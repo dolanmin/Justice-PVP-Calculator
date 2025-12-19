@@ -5,6 +5,9 @@ import traceback
 import json
 import os
 
+# ==========================================
+# 1. 核心計算邏輯 (V6.0 元素深度分析)
+# ==========================================
 class JusticeCalculator:
     def __init__(self):
         self.BASE_COEFF = 2273 
@@ -13,12 +16,15 @@ class JusticeCalculator:
         self.RES_CONST = 1965
         
     def calculate_damage(self, attacker, defender, skill_percent=1.0):
+        # 1. 防禦面計算
         rem_def = max(0, defender['defense'] - attacker['break_def'])
         def_reduction = rem_def / (rem_def + self.DEF_CONST)
         
+        # 元素抗性計算 (記錄中間值)
         rem_res = max(0, defender['element_res'] - attacker['ignore_res'])
         res_reduction = rem_res / (rem_res + self.RES_CONST)
         
+        # 真實氣盾公式
         shield = defender['shield']
         break_shield = attacker['break_shield']
         if break_shield >= shield:
@@ -29,6 +35,7 @@ class JusticeCalculator:
             rem_shield = shield - 2 * break_shield
         rem_shield = max(0, rem_shield)
             
+        # 2. 基礎傷害
         atk_part = (attacker['attack'] - rem_shield + 
                     (attacker['kezhi'] + attacker['skill_enhance']) - 
                     (defender['resist'] + defender['skill_resist']))
@@ -36,10 +43,14 @@ class JusticeCalculator:
         phy_base = self.BASE_COEFF + self.SCALING_COEFF * atk_part
         if phy_base < 0: phy_base = 0
         phy_final = phy_base * (1 - def_reduction)
-        ele_final = self.SCALING_COEFF * attacker['element_attack'] * (1 - res_reduction)
+        
+        # 元素部分：計算有效攻擊 (Effective Elemental Attack)
+        ele_effective = attacker['element_attack'] * (1 - res_reduction)
+        ele_final = self.SCALING_COEFF * ele_effective
         
         base_dmg = (phy_final + ele_final) * skill_percent
         
+        # 3. 乘區與爆擊
         multiplier = 1 + attacker['kezhi_pct'] - defender['perma_reduction']
         multiplier = max(0, multiplier)
         non_crit_damage = base_dmg * multiplier
@@ -75,7 +86,10 @@ class JusticeCalculator:
                 "def_red": def_reduction,
                 "hit": hit_rate,
                 "crit": crit_rate,
-                "rem_res": rem_res
+                "orig_ele": attacker['element_attack'], # 原始元素
+                "eff_ele": ele_effective,               # 有效元素
+                "rem_res": rem_res,                     # 剩餘抗性
+                "res_red": res_reduction                # 抗性減傷率
             }
         }
 
@@ -115,11 +129,14 @@ class JusticeCalculator:
         except:
             return []
 
+# ==========================================
+# 2. 視窗介面 (V6.0 完美置底版)
+# ==========================================
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("逆水寒 PVP 傷害分析器 V5.2")
-        self.geometry("1100x900")
+        self.title("逆水寒 PVP 傷害分析器 V6.0 (元素深度分析版)")
+        self.geometry("1100x940")
         self.configure(bg="#f2f2f2")
         
         self.SAVE_FILE = "justice_save.json"
@@ -127,23 +144,29 @@ class App(tk.Tk):
         
         self.calculator = JusticeCalculator()
         
-        header = tk.Label(self, text="⚔️ PVP 傷害數據中心", font=('微軟正黑體', 18, 'bold'), bg="#2d3436", fg="#ffffff", pady=10)
+        # 1. 頂部標題
+        header = tk.Label(self, text="⚔️ PVP 傷害數據中心", font=('微軟正黑體', 18, 'bold'), bg="#2d3436", fg="#ffffff", pady=12)
         header.pack(side=tk.TOP, fill=tk.X)
         
+        # 2. 底部固定欄 (Footer) - 優先 Pack 確保置底
         footer_frame = tk.Frame(self, bg="#e0e0e0", bd=1, relief="sunken")
         footer_frame.pack(side=tk.BOTTOM, fill=tk.X)
         
+        # 狀態列
         self.status_var = tk.StringVar()
         self.status_var.set("系統準備就緒 (已載入設定)")
         status_bar = tk.Label(footer_frame, textvariable=self.status_var, font=('微軟正黑體', 9), fg="#666666", bg="#e0e0e0", padx=10, pady=5)
         status_bar.pack(side=tk.LEFT)
 
+        # 簽名
         author_label = tk.Label(footer_frame, text="Designed by 由那由它", font=('微軟正黑體', 9, 'bold'), fg="#555555", bg="#e0e0e0", padx=10, pady=5)
         author_label.pack(side=tk.RIGHT)
 
+        # 3. 主要內容區
         main_frame = tk.Frame(self, bg="#f2f2f2")
         main_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=20, pady=10)
         
+        # --- 輸入區 ---
         input_container = tk.Frame(main_frame, bg="#f2f2f2")
         input_container.pack(fill=tk.X, pady=5)
         
@@ -189,14 +212,17 @@ class App(tk.Tk):
         self.create_inputs_grid(left_box, atk_fields, self.atk_entries, "#fff0f0")
         self.create_inputs_grid(right_box, def_fields, self.def_entries, "#f0f8ff")
         
+        # --- 按鈕 ---
         calc_btn = tk.Button(main_frame, text="🚀 執行全面分析 (並存檔)", font=('微軟正黑體', 14, 'bold'), 
                              bg="#27ae60", fg="white", cursor="hand2", width=20, pady=5, command=self.on_calculate)
         calc_btn.pack(pady=10)
         
+        # --- 結果顯示區 ---
         result_box = tk.LabelFrame(main_frame, text="【分析報告】", font=('微軟正黑體', 12, 'bold'), 
                                    bg="#ffffff", fg="#333333", padx=10, pady=10)
         result_box.pack(fill=tk.BOTH, expand=True)
         
+        # 1. 大數字區
         dmg_frame = tk.Frame(result_box, bg="#fffcf5")
         dmg_frame.pack(fill=tk.X, pady=(0, 10))
         
@@ -209,6 +235,7 @@ class App(tk.Tk):
             l.pack()
             self.dmg_labels[title] = l
 
+        # 2. 詳細數據與建議
         grid_frame = tk.Frame(result_box, bg="white")
         grid_frame.pack(fill=tk.BOTH, expand=True)
         
@@ -222,16 +249,19 @@ class App(tk.Tk):
             "relief": "flat", "highlightthickness": 1, "highlightbackground": "#cccccc"
         }
 
+        # 左邊：詳細數據
         self.detail_text = tk.Text(grid_frame, font=('微軟正黑體', 11), bg="#f9f9f9", **text_config)
         self.detail_text.grid(row=0, column=0, rowspan=2, sticky="nsew", padx=(0, 10))
         self.detail_text.insert(tk.END, "等待計算...\n\n(點擊上方按鈕開始)")
         self.detail_text.config(state="disabled")
 
+        # 右上：攻擊建議
         self.atk_text = tk.Text(grid_frame, font=('微軟正黑體', 10), bg="#fff5f5", height=8, **text_config)
         self.atk_text.grid(row=0, column=1, sticky="nsew", pady=(0, 2))
         self.atk_text.insert(tk.END, "攻擊收益建議區")
         self.atk_text.config(state="disabled")
 
+        # 右下：防禦建議
         self.def_text = tk.Text(grid_frame, font=('微軟正黑體', 10), bg="#f0faff", height=8, **text_config)
         self.def_text.grid(row=1, column=1, sticky="nsew", pady=(2, 0))
         self.def_text.insert(tk.END, "防禦收益建議區")
@@ -295,15 +325,19 @@ class App(tk.Tk):
             self.dmg_labels["期望傷害"].config(text=f"{int(res['expected']):,}")
             
             detail_txt = (
-                f"【實戰數據】\n"
+                f"【實戰擊殺評估】\n"
                 f"● 擊殺所需: {hits_to_kill} 刀\n"
                 f"● 實際命中: {res['details']['hit']:.1%}\n"
                 f"● 實際會心: {res['details']['crit']:.1%}\n\n"
-                f"【詳細過程】\n"
+                f"【物理破防分析】\n"
                 f"● 有效攻擊: {int(res['details']['atk_part']):,}\n"
                 f"● 剩餘防禦: {int(res['details']['rem_def'])}\n"
-                f"● 剩餘氣盾: {int(res['details']['rem_shield'])}\n"
-                f"● 剩餘元抗: {int(res['details']['rem_res'])}\n"
+                f"● 剩餘氣盾: {int(res['details']['rem_shield'])}\n\n"
+                f"【元素穿透分析】\n"
+                f"● 原始元素: {int(res['details']['orig_ele']):,}\n"
+                f"● 有效元素: {int(res['details']['eff_ele']):,}\n"
+                f"   (損失 {res['details']['res_red']:.1%})\n"
+                f"● 剩餘元抗: {int(res['details']['rem_res'])}"
             )
             self.update_text_widget(self.detail_text, detail_txt)
             
